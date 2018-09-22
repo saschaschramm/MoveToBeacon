@@ -1,6 +1,7 @@
 import tensorflow as tf
 
-class PolicyFullyConnected():
+
+class PolicyFullyConnected:
     def __init__(self, observation_space, action_space, spatial_resolution):
         height, width = observation_space
         self.screen_player = tf.placeholder(tf.float32, [None, height, width], name="screen_player")
@@ -17,10 +18,10 @@ class PolicyFullyConnected():
         inputs_reshaped = tf.reshape(inputs, [tf.shape(inputs)[0], width * height * channels])
 
         hidden = tf.layers.dense(inputs=inputs_reshaped, units=256, activation=tf.nn.relu)
-        logits_policy = tf.layers.dense(inputs=hidden, units=action_space, activation=None)
-        logits_policy_spatial = tf.layers.dense(inputs=hidden,
-                                                units=spatial_resolution[0]*spatial_resolution[1],
-                                                activation=None)
+        logits = tf.layers.dense(inputs=hidden, units=action_space, activation=None)
+        logits_spatial = tf.layers.dense(inputs=hidden,
+                                         units=spatial_resolution[0]*spatial_resolution[1],
+                                         activation=None)
 
-        self.policy = tf.nn.softmax(logits_policy)
-        self.policy_spatial = tf.nn.softmax(logits_policy_spatial)
+        self.probs = tf.nn.softmax(logits)
+        self.probs_spatial = tf.nn.softmax(logits_spatial)

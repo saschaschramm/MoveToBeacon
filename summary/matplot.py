@@ -1,7 +1,8 @@
-import matplotlib
-matplotlib.use('TkAgg')
 import matplotlib.pyplot as pyplot
 import os
+import matplotlib
+matplotlib.use('TkAgg')
+
 
 def plot(x, y, left_limit, right_limit, bottom_limit, top_limit, save, filename):
     pyplot.plot(x, y)

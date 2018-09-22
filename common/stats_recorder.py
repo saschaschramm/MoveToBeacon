@@ -1,6 +1,7 @@
 import time
 from summary.logger import SummaryWriter
 
+
 class StatsRecorder:
 
     def __init__(self, summary_frequency,
@@ -15,11 +16,11 @@ class StatsRecorder:
         self.start_time = 0
         self.summary_writer = SummaryWriter(summary_log_dir)
         self.save = save
+        self.t = 0
 
-    def print_score(self, t):
+    def print_score(self):
         end_time = time.time()
-
-        if t == 0:
+        if self.t == 0:
             elapsed_time = 0
         else:
             elapsed_time = end_time - self.start_time
@@ -27,18 +28,20 @@ class StatsRecorder:
         score = sum(self.total_rewards[-self.performance_num_episodes:]) / self.performance_num_episodes
 
         if self.save:
-            self.summary_writer.write(value=score, step=t)
+            self.summary_writer.write(value=score, step=self.t)
 
-        print("{0:} {1:} {2:.1f}".format(t, score, elapsed_time))
+        print("{0:} {1:} {2:.1f}".format(self.t, score, elapsed_time))
         self.start_time = end_time
 
-    def after_step(self, reward, done, t):
+    def after_step(self, reward, terminal):
         self.total_reward += reward
 
-        if t % self.summary_frequency == 0:
-            self.print_score(t)
+        if self.t % self.summary_frequency == 0:
+            self.print_score()
 
-        if done:
+        if terminal:
             self.num_episodes += 1
             self.total_rewards.append(self.total_reward)
             self.total_reward = 0
+
+        self.t += 1

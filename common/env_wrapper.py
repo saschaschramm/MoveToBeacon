@@ -3,6 +3,7 @@ from pysc2.lib import actions
 import numpy
 numpy.set_printoptions(threshold=numpy.nan)
 
+
 class EnvWrapper:
 
     def __init__(self, env):

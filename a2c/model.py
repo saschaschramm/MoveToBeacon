@@ -1,10 +1,12 @@
 import tensorflow as tf
 import numpy as np
 
+
 def sample(probs):
     random_uniform = tf.random_uniform(tf.shape(probs))
     scaled_random_uniform = tf.log(random_uniform) / probs
     return tf.argmax(scaled_random_uniform, axis=1)
+
 
 class Model:
 
@@ -21,11 +23,11 @@ class Model:
         self.action_spatial_index = tf.placeholder(tf.int32, [None], name="action_spatial_index")
         self.action = tf.placeholder(tf.int32, [None], name="action")
         self.model = self.policy(self.observation_space, self.action_space, self.spatial_resolution)
+        self.advantages = tf.placeholder(tf.float32, [None])
 
-        action_probs = self.model.policy * self.available_actions_mask
-
-        # normalize to 1
-        action_probs /= tf.reduce_sum(action_probs, axis=1, keepdims=True)
+        # Policy
+        action_probs = self.model.probs * self.available_actions_mask
+        action_probs /= tf.reduce_sum(action_probs, axis=1, keepdims=True) # normalize to 1
 
         action_log_probs = tf.reduce_sum(
             tf.one_hot(self.action, self.action_space) *
@@ -35,20 +37,23 @@ class Model:
         action_spatial_log_probs = tf.reduce_sum(
             tf.one_hot(self.action_spatial_index, self.spatial_resolution[0] * self.spatial_resolution[1]) *
             tf.expand_dims(self.action_spatial_mask, axis=1) *
-            tf.log(self.model.policy_spatial + 1e-13)
+            tf.log(self.model.probs_spatial + 1e-13)
             , axis=1)
 
+        # Sample
         self.sampled_action = sample(action_probs)
-        self.sampled_action_spatial = sample(self.model.policy_spatial)
+        self.sampled_action_spatial = sample(self.model.probs_spatial)
 
-        self.loss = -tf.reduce_mean((action_spatial_log_probs + action_log_probs) * self.reward)
+        # Loss
+        policy_loss = -tf.reduce_mean((action_spatial_log_probs + action_log_probs) * self.advantages)
+        value_loss = tf.reduce_mean(tf.squared_difference(self.model.values, self.reward))
+        self.loss = policy_loss + value_loss
+
         self.optimizer = tf.train.RMSPropOptimizer(self.learning_rate, decay=0.99).minimize(self.loss)
-
         self.session = tf.Session()
         self.session.run(tf.global_variables_initializer())
 
-    def predict_action(self, observations, available_actions):
-
+    def predict(self, observations, available_actions):
         feed_dict = {
             self.available_actions_mask: available_actions,
             self.model.screen_player: np.asarray(observations[0]),
@@ -56,13 +61,21 @@ class Model:
             self.model.screen_selected: np.asarray(observations[2])
         }
 
-        action_ids, spatial_action_indexes = self.session.run(
-            [self.sampled_action, self.sampled_action_spatial],
+        action_ids, spatial_action_indexes, values = self.session.run(
+            [self.sampled_action, self.sampled_action_spatial, self.model.values],
             feed_dict=feed_dict
         )
-        return action_ids, spatial_action_indexes
+        return action_ids, spatial_action_indexes, values[0]
 
-    def train(self, observations, actions, available_actions_mask, actions_spatial, actions_spatial_mask, rewards):
+    def predict_value(self, observations):
+        return self.session.run(self.model.values, feed_dict={
+            self.model.screen_player: np.asarray([observations[0]]),
+            self.model.screen_beacon: np.asarray([observations[1]]),
+            self.model.screen_selected: np.asarray([observations[2]])
+        })
+
+    def train(self, observations, actions, available_actions_mask, actions_spatial, actions_spatial_mask, rewards, values):
+        advantage = rewards - values
         feed_dict = {
             self.reward: rewards,
             self.action_spatial_mask: actions_spatial_mask,
@@ -71,10 +84,10 @@ class Model:
             self.action: actions,
             self.model.screen_player: np.asarray(observations[0]),
             self.model.screen_beacon: np.asarray(observations[1]),
-            self.model.screen_selected: np.asarray(observations[2])
+            self.model.screen_selected: np.asarray(observations[2]),
+            self.advantages: advantage
         }
-
-        loss, _ = self.session.run([self.loss, self.optimizer], feed_dict=feed_dict)
+        self.session.run([self.loss, self.optimizer], feed_dict=feed_dict)
 
     def save(self, id):
         variables = tf.trainable_variables()

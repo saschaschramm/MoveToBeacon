@@ -1,33 +1,32 @@
 import numpy as np
 from summary.logger import SummaryWriter
 from common.stats_recorder import StatsRecorder
-
 from pysc2.lib import actions
 
-class Runner():
+
+class Runner:
+
     def __init__(self, env, model, batch_size, discount_rate,
-                 summary_log_dir, save_summary_steps, performance_num_episodes):
+                 summary_log_dir, summary_frequency, performance_num_episodes):
         self.env = env
         self.batch_size = batch_size
         self.discount_rate = discount_rate
         self.model = model
-
         self.file_writer = SummaryWriter(summary_log_dir)
-        self.save_summary_steps = save_summary_steps
+        self.save_summary_steps = summary_frequency
         self.performance_num_episodes = performance_num_episodes
-        self.observations, self.available_actions_masks = self.env.reset()
+        self.observation, self.available_actions_mask = self.env.reset()
 
-        self.stats_recorder = StatsRecorder(summary_frequency=save_summary_steps,
+        self.stats_recorder = StatsRecorder(summary_frequency=summary_frequency,
                                             performance_num_episodes=performance_num_episodes,
                                             summary_log_dir=summary_log_dir,
                                             save=True)
-        self.t = 0
 
-    def discount(self, rewards, dones, discount_rate):
+    def discount(self, rewards, terminals, discount_rate):
         discounted = []
         total_return = 0
-        for reward, done in zip(rewards[::-1], dones[::-1]):
-            if done:
+        for reward, terminal in zip(rewards[::-1], terminals[::-1]):
+            if terminal:
                 total_return = reward
             else:
                 total_return = reward + discount_rate * total_return
@@ -60,42 +59,37 @@ class Runner():
             raise NotImplementedError
 
     def run(self):
-        batch_observations = []
-        batch_rewards = []
-        batch_actions = []
-        batch_actions_spatial = []
-        batch_actions_spatial_mask = []
-        batch_available_actions = []
-        batch_dones = []
+        observations = []
+        rewards = []
+        actions = []
+        actions_spatial = []
+        actions_spatial_mask = []
+        available_action_masks = []
+        terminals = []
 
         for _ in range(self.batch_size):
-            batch_observations.append(self.observations)
-
-            action_ids, spatial_indexes = self.model.predict_action(
-                np.asarray([self.observations]).swapaxes(0, 1),
-                [self.available_actions_masks]
+            observations.append(self.observation)
+            action_ids, spatial_indexes = self.model.predict(
+                np.asarray([self.observation]).swapaxes(0, 1),
+                [self.available_actions_mask]
             )
 
             action, spatial_mask = self.make_action(action_ids[0], spatial_indexes[0])
-            batch_actions.append(action_ids[0])
-            batch_actions_spatial.append(spatial_indexes[0])
-            batch_actions_spatial_mask.append(spatial_mask)
-            batch_available_actions.append(self.available_actions_masks)
+            actions.append(action_ids[0])
+            actions_spatial.append(spatial_indexes[0])
+            actions_spatial_mask.append(spatial_mask)
+            available_action_masks.append(self.available_actions_mask)
+            self.observation, reward, terminal, self.available_actions_mask = self.env.step(action)
+            self.stats_recorder.after_step(reward=reward, terminal=terminal)
+            rewards.append(reward)
+            terminals.append(terminal)
 
-            self.observations, rewards, dones, self.available_actions_masks = self.env.step(action)
+        rewards = self.discount(rewards, terminals, self.discount_rate)
+        observations = np.asarray(observations).swapaxes(0, 1)
 
-            self.stats_recorder.after_step(reward=rewards, done=dones, t=self.t)
-            self.t += 1
-
-            batch_rewards.append(rewards)
-            batch_dones.append(dones)
-
-        batch_rewards = self.discount(batch_rewards, batch_dones, self.discount_rate)
-        batch_observations = np.asarray(batch_observations).swapaxes(0, 1)
-
-        self.model.train(batch_observations,
-                         batch_actions,
-                         batch_available_actions,
-                         batch_actions_spatial,
-                         batch_actions_spatial_mask,
-                         batch_rewards)
+        self.model.train(observations=observations,
+                         actions=actions,
+                         available_actions_masks=available_action_masks,
+                         actions_spatial=actions_spatial,
+                         actions_spatial_masks=actions_spatial_mask,
+                         rewards=rewards)
